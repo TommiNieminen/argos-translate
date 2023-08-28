@@ -3,6 +3,9 @@ from __future__ import annotations
 import ctranslate2
 import sentencepiece as spm
 import stanza
+
+from sentence_splitter import SentenceSplitter, split_text_into_sentences
+
 from ctranslate2 import Translator
 
 from argostranslate import apis, fewshot, package, sbd, settings
@@ -414,15 +417,18 @@ def apply_packaged_translation(
     if pkg.type == "sbd":
         sentences = [input_text]
     elif settings.stanza_available:
-        stanza_pipeline = stanza.Pipeline(
+        ''' stanza_pipeline = stanza.Pipeline(
             lang=pkg.from_code,
             dir=str(pkg.package_path / "stanza"),
-            processors="tokenize",
+            processors="tokenize,ssplit,truecase",
             use_gpu=settings.device == "cuda",
             logging_level="WARNING",
         )
         stanza_sbd = stanza_pipeline(input_text)
-        sentences = [sentence.text for sentence in stanza_sbd.sentences]
+        sentences = [sentence.text for sentence in stanza_sbd.sentences]'''
+        #Override Stabza sebtence splitting, it does not work well with Finnish
+        splitter = SentenceSplitter(language=pkg.from_code)
+        sentences = splitter.split(input_text)
     else:
         DEFAULT_SENTENCE_LENGTH = 250
         sentences = []
