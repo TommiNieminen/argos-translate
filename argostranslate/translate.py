@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctranslate2
 import sentencepiece as spm
 import stanza
+import unicodedata
 
 from sentence_splitter import SentenceSplitter, split_text_into_sentences
 
@@ -395,6 +396,24 @@ class FewShotTranslation(ITranslation):
         return [Hypothesis(to_return, 0)] * num_hypotheses
 
 
+def opus_preprocess(sentence: str):
+    #from https://github.com/Helsinki-NLP/OPUS-MT-train/blob/master/scripts/preprocess-txt.sh
+    replacements = [("，",","),("。 *",". "),("、",","),("”","\""),("“","\""),("∶",":"),("：",":"),("？","?"),("《","\""),("》","\""),("）",")"),("！","!"),("（","("),("；",";"),("１","\""),("」","\""),("「","\""),("０","0"),("３","3"),("２","2"),("５","5"),("６","6"),("９","9"),("７","7"),("８","8"),("４","4"),("． *",". "),("～","~"),("’","'"),("…","..."),("━","-"),("〈","<"),("〉",">"),("【","["),("】","]"),("％","%")]
+    for replacement in replacements:
+        sentence = sentence.replace(replacement[0],replacement[1])
+
+    #remove control characters
+    sentence =  "".join(ch for ch in sentence if unicodedata.category(ch)[0]!="C")
+        
+    characters_to_remove = ['\u2060', '\u200B', '\uFEFF']
+
+    for char in characters_to_remove:
+        sentence = sentence.replace(char, '')
+
+    #remove leading, trailing, and consecutive spaces
+    sentence = ' '.join(sentence.split())
+    return sentence
+
 def apply_packaged_translation(
     pkg: Package, input_text: str, translator: Translator, num_hypotheses: int = 4
 ) -> list[Hypothesis]:
@@ -420,15 +439,18 @@ def apply_packaged_translation(
         ''' stanza_pipeline = stanza.Pipeline(
             lang=pkg.from_code,
             dir=str(pkg.package_path / "stanza"),
-            processors="tokenize,ssplit,truecase",
+            processors="tokenize,split,truecase",
             use_gpu=settings.device == "cuda",
             logging_level="WARNING",
         )
         stanza_sbd = stanza_pipeline(input_text)
         sentences = [sentence.text for sentence in stanza_sbd.sentences]'''
-        #Override Stabza sebtence splitting, it does not work well with Finnish
+        #Override Stanza sebtence splitting, it does not work well with Finnish
         splitter = SentenceSplitter(language=pkg.from_code)
         sentences = splitter.split(input_text)
+        
+        #run opus preprocessing on the sentence split
+        sentences = [opus_preprocess(x) for x in sentences]
     else:
         DEFAULT_SENTENCE_LENGTH = 250
         sentences = []
