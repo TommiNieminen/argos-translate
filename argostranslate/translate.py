@@ -404,7 +404,12 @@ def opus_preprocess(sentence: str):
 
     #remove control characters
     sentence =  "".join(ch for ch in sentence if unicodedata.category(ch)[0]!="C")
-        
+       
+    #convert ndash and mdash to hyphen (this is not part of OPUS-MT preprocessing, but
+    #the training corpora must have been preprocessed to remove ndash and mdash at some
+    #point, since they occur only in few contexts)
+    sentence = sentence.replace('—', ' - ').replace('–', ' - ')
+    
     characters_to_remove = ['\u2060', '\u200B', '\uFEFF']
 
     for char in characters_to_remove:
@@ -436,19 +441,19 @@ def apply_packaged_translation(
     if pkg.type == "sbd":
         sentences = [input_text]
     elif settings.stanza_available:
-        ''' stanza_pipeline = stanza.Pipeline(
+        """stanza_pipeline = stanza.Pipeline(
             lang=pkg.from_code,
             dir=str(pkg.package_path / "stanza"),
-            processors="tokenize,split,truecase",
+            processors="tokenize",
             use_gpu=settings.device == "cuda",
             logging_level="WARNING",
         )
         stanza_sbd = stanza_pipeline(input_text)
-        sentences = [sentence.text for sentence in stanza_sbd.sentences]'''
+        stanza_sentences = [sentence.text for sentence in stanza_sbd.sentences]"""
         #Override Stanza sebtence splitting, it does not work well with Finnish
         splitter = SentenceSplitter(language=pkg.from_code)
         sentences = splitter.split(input_text)
-        
+
         #run opus preprocessing on the sentence split
         sentences = [opus_preprocess(x) for x in sentences]
     else:
@@ -487,12 +492,13 @@ def apply_packaged_translation(
     BATCH_SIZE = 32
     translated_batches = translator.translate_batch(
         tokenized,
-        replace_unknowns=True,
+        replace_unknowns=False,
         max_batch_size=BATCH_SIZE,
         beam_size=max(num_hypotheses, 4),
         num_hypotheses=num_hypotheses,
         length_penalty=0.2,
         return_scores=True,
+        disable_unk=False
     )
     info("translated_batches", translated_batches)
 
