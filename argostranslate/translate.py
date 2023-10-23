@@ -492,11 +492,10 @@ def apply_packaged_translation(
     BATCH_SIZE = 32
     translated_batches = translator.translate_batch(
         tokenized,
-        replace_unknowns=False,
+        replace_unknowns=True,
         max_batch_size=BATCH_SIZE,
         beam_size=max(num_hypotheses, 4),
         num_hypotheses=num_hypotheses,
-        length_penalty=0.2,
         return_scores=True,
         disable_unk=False
     )
