@@ -168,8 +168,9 @@ class PackageTranslation(ITranslation):
         if self.translator is None:
             model_path = str(self.pkg.package_path / "model")
             self.translator = ctranslate2.Translator(model_path, device=settings.device)
-        paragraphs = ITranslation.split_into_paragraphs(input_text)
-        info("paragraphs:", paragraphs)
+        #paragraphs = ITranslation.split_into_paragraphs(input_text)
+        paragraphs = [input_text]
+        #info("paragraphs:", paragraphs)
         translated_paragraphs = []
         for paragraph in paragraphs:
             translated_paragraphs.append(
@@ -286,7 +287,9 @@ class CachedTranslation(ITranslation):
 
     def hypotheses(self, input_text: str, num_hypotheses: int = 4) -> list[Hypothesis]:
         new_cache = dict()  # 'text': ['t1'...('tN')]
-        paragraphs = ITranslation.split_into_paragraphs(input_text)
+        #paragraphs = ITranslation.split_into_paragraphs(input_text)
+        paragraphs = [input_text]
+        info("paragraphs",paragraphs)
         translated_paragraphs = []
         for paragraph in paragraphs:
             translated_paragraph = self.cache.get(paragraph)
@@ -396,28 +399,28 @@ class FewShotTranslation(ITranslation):
         return [Hypothesis(to_return, 0)] * num_hypotheses
 
 
-def opus_preprocess(sentence: str):
+def opus_preprocess(input_text: str):
     #from https://github.com/Helsinki-NLP/OPUS-MT-train/blob/master/scripts/preprocess-txt.sh
     replacements = [("，",","),("。 *",". "),("、",","),("”","\""),("“","\""),("∶",":"),("：",":"),("？","?"),("《","\""),("》","\""),("）",")"),("！","!"),("（","("),("；",";"),("１","\""),("」","\""),("「","\""),("０","0"),("３","3"),("２","2"),("５","5"),("６","6"),("９","9"),("７","7"),("８","8"),("４","4"),("． *",". "),("～","~"),("’","'"),("…","..."),("━","-"),("〈","<"),("〉",">"),("【","["),("】","]"),("％","%")]
     for replacement in replacements:
-        sentence = sentence.replace(replacement[0],replacement[1])
+        input_text = input_text.replace(replacement[0],replacement[1])
 
     #remove control characters
-    sentence =  "".join(ch for ch in sentence if unicodedata.category(ch)[0]!="C")
+    input_text =  "".join(ch for ch in input_text if unicodedata.category(ch)[0]!="C")
        
     #convert ndash and mdash to hyphen (this is not part of OPUS-MT preprocessing, but
     #the training corpora must have been preprocessed to remove ndash and mdash at some
     #point, since they occur only in few contexts)
-    sentence = sentence.replace('—', ' - ').replace('–', ' - ')
+    input_text = input_text.replace('—', ' - ').replace('–', ' - ')
     
     characters_to_remove = ['\u2060', '\u200B', '\uFEFF']
 
     for char in characters_to_remove:
-        sentence = sentence.replace(char, '')
+        input_text = input_text.replace(char, '')
 
     #remove leading, trailing, and consecutive spaces
-    sentence = ' '.join(sentence.split())
-    return sentence
+    input_text = ' '.join(input_text.split())
+    return input_text
 
 def apply_packaged_translation(
     pkg: Package, input_text: str, translator: Translator, num_hypotheses: int = 4
@@ -451,11 +454,27 @@ def apply_packaged_translation(
         stanza_sbd = stanza_pipeline(input_text)
         stanza_sentences = [sentence.text for sentence in stanza_sbd.sentences]"""
         #Override Stanza sebtence splitting, it does not work well with Finnish
+        #run opus preprocessing on the sentence split (need to do this before splitting, as it
+        #it relies on normalized punctuation)
         splitter = SentenceSplitter(language=pkg.from_code)
-        sentences = splitter.split(input_text)
-
-        #run opus preprocessing on the sentence split
-        sentences = [opus_preprocess(x) for x in sentences]
+        sentencebreak_indices = []
+        sentences = []
+        sentence_count = 0
+        paras = input_text.split('\n')
+        info("paras",paras)
+        for para in paras:
+            if len(para) > 0:
+                para = opus_preprocess(para)
+                parasentences = splitter.split(para)
+                sentences += parasentences
+                info("para_sentences",parasentences)
+                sentence_count += len(parasentences)
+            sentencebreak_indices.append(sentence_count)
+            sentence_count += 1
+ 
+        # record sentence break positions, and remove sentencebreaks from sentences
+        info("sentences",sentences)
+        info("sb_indices",sentencebreak_indices)
     else:
         DEFAULT_SENTENCE_LENGTH = 250
         sentences = []
@@ -506,10 +525,16 @@ def apply_packaged_translation(
     for i in range(num_hypotheses):
         translated_tokens = []
         cumulative_score = 0
-        for translated_batch in translated_batches:
+        sentencebreak_offset = 0
+        for batch_index,translated_batch in enumerate(translated_batches):
+            while batch_index+sentencebreak_offset in sentencebreak_indices:
+                translated_tokens += "\n"
+                cumulative_score += 0
+                sentencebreak_offset += 1
             translated_tokens += translated_batch[i]["tokens"]
             cumulative_score += translated_batch[i]["score"]
         detokenized = "".join(translated_tokens)
+        detokenized = detokenized.replace("\n▁", "\n")
         detokenized = detokenized.replace("▁", " ")
         value = detokenized
         if len(value) > 0 and value[0] == " ":
